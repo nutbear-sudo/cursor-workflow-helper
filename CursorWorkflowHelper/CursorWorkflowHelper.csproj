@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon />
+    <StartupObject>CursorWorkflowHelper.Program</StartupObject>
+    <RootNamespace>CursorWorkflowHelper</RootNamespace>
+    <AssemblyName>CursorWorkflowHelper</AssemblyName>
+    <Version>1.0.0</Version>
+    <Description>Cursor 省 Token 工作流助手 — 先在免费模型/Trae 想清楚，再进 Cursor 做窄范围改动</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="Data\default-templates.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
