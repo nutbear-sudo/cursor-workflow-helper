@@ -69,7 +69,7 @@ public sealed class MainForm : Form
         RefreshHistoryList();
         ApplyAppearance();
         UpdateChecklistStatus();
-        SetStatus("就绪。先在「任务简报」填好，再生成提示词。");
+        SetStatus("就绪。可「复制生成简报提示词」→ Cursor Ask →「从剪贴板导入」→「一键拆成三类提示词」。");
     }
 
     private void LoadData()
@@ -90,14 +90,17 @@ public sealed class MainForm : Form
         _tabs.TabPages.Add(BuildTemplatesTab());
         _tabs.TabPages.Add(BuildHistoryTab());
 
-        var top = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 6, 8, 4) };
+        var top = new Panel { Dock = DockStyle.Top, Height = 72, Padding = new Padding(8, 6, 8, 4) };
         var flow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = true
         };
 
+        var btnImport = MakeButton("从剪贴板导入", (_, _) => ImportFromClipboard());
+        var btnSplit = MakeButton("一键拆成三类提示词", PrimaryClick);
+        var btnCopyAsk = MakeButton("复制生成简报提示词", (_, _) => CopyAskBriefPrompt());
         var btnGenerate = MakeButton("生成提示词", PrimaryClick);
         var btnSave = MakeButton("保存简报", (_, _) => SaveBrief());
         var btnNew = MakeButton("新建简报", (_, _) => NewBrief());
@@ -117,7 +120,10 @@ public sealed class MainForm : Form
             _settings.Save();
         };
 
-        flow.Controls.AddRange([btnGenerate, btnSave, btnNew, btnExport, _chkDark, _chkTopMost]);
+        flow.Controls.AddRange(
+        [
+            btnImport, btnSplit, btnCopyAsk, btnGenerate, btnSave, btnNew, btnExport, _chkDark, _chkTopMost
+        ]);
         top.Controls.Add(flow);
 
         _status = new StatusStrip();
@@ -188,7 +194,7 @@ public sealed class MainForm : Form
         var tip = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "提示：文件 / 区域尽量 ≤5 个；验收写成可勾选的结果。填完后点顶部「生成提示词」。",
+            Text = "提示：可在 Cursor Ask 生成简报后「从剪贴板导入」；文件 / 区域尽量 ≤5 个；再点「一键拆成三类提示词」。",
             ForeColor = Color.DimGray
         };
         layout.Controls.Add(new Label(), 0, 5);
@@ -500,6 +506,80 @@ public sealed class MainForm : Form
         _tabs.SelectedIndex = 1;
     }
 
+    private void ImportFromClipboard()
+    {
+        string text;
+        try
+        {
+            if (!Clipboard.ContainsText())
+            {
+                MessageBox.Show(this, "剪贴板没有文本。请先复制 Cursor Ask 生成的任务简报。", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            text = Clipboard.GetText() ?? "";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "读取剪贴板失败：" + ex.Message, "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var parsed = BriefParser.Parse(text);
+        if (parsed.IsEmpty)
+        {
+            MessageBox.Show(this,
+                "未能识别任务简报字段。\n请确认文本含「目标 / 触及文件 / 不做范围 / 验收标准 / 偏好做法」等标题或标签行。",
+                "解析失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // 保留当前 Id，当作编辑现有简报；字段能填多少填多少
+        var id = _current.Id;
+        var created = _current.CreatedAt;
+        _current = parsed.Brief;
+        _current.Id = id;
+        _current.CreatedAt = created;
+        _current.UpdatedAt = DateTime.Now;
+
+        // 偏好做法若不在下拉项中，回退默认，避免 ComboBox 空白
+        if (!ApproachOptions.All.Contains(_current.PreferredApproach))
+            _current.PreferredApproach = ApproachOptions.UserSkeletonAiFills;
+
+        BindCurrentToForm();
+        _tabs.SelectedIndex = 0;
+
+        if (parsed.IsPartial)
+        {
+            SetStatus($"已部分导入（识别 {parsed.FilledFieldCount}/5 项），请补全后点「一键拆成三类提示词」。");
+            MessageBox.Show(this,
+                $"已填入可识别字段（{parsed.FilledFieldCount}/5）。\n未识别的项请手动补全，再点「一键拆成三类提示词」。",
+                "部分导入", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // 完整简报：用模板引擎拆成三类提示词
+        GeneratePrompts();
+        SetStatus("已从剪贴板导入简报，并拆成三类提示词。");
+    }
+
+    private void CopyAskBriefPrompt()
+    {
+        try
+        {
+            var prompt = AskPromptStore.Load();
+            Clipboard.SetText(prompt.Trim());
+            SetStatus("已复制「生成简报」Ask 提示词。请粘贴到 Cursor Ask（短对话）。");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "复制失败：" + ex.Message, "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private void GeneratePrompts()
     {
         ReadBriefFromFormIntoCurrent();
@@ -514,7 +594,7 @@ public sealed class MainForm : Form
         _rtbFree.Text = _generator.Generate(_current, TemplateTargets.FreeQa, SelectedTemplateId(_cmbTplFree));
         _rtbTrae.Text = _generator.Generate(_current, TemplateTargets.Trae, SelectedTemplateId(_cmbTplTrae));
         _rtbCursor.Text = _generator.Generate(_current, TemplateTargets.CursorAgent, SelectedTemplateId(_cmbTplCursor));
-        SetStatus("已生成三类提示词。可分别复制；进 Cursor 前请过检查清单。");
+        SetStatus("已拆成三类提示词。可分别复制；进 Cursor 前请过检查清单。");
     }
 
     private static string? SelectedTemplateId(ComboBox cmb) =>
